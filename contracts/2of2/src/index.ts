@@ -8,6 +8,20 @@
  * - Bytes 37-56: First public key blake160 hash
  * - Bytes 57-76: Second public key blake160 hash
  *
+ * Script Args Detailed Structure:
+ * ┌────────┬──────────────────┬───────────┬───────────┬──────────────┬─────────────────┬─────────────────┐
+ * │ Prefix │   Code Hash      │ Hash Type │ Threshold │ Pubkey Count │ First Pubkey    │ Second Pubkey   │
+ * │(2 bytes)│   (32 bytes)     │ (1 byte)  │ (1 byte)  │  (1 byte)    │ Hash (20 bytes) │ Hash (20 bytes) │
+ * └────────┴──────────────────┴───────────┴───────────┴──────────────┴─────────────────┴─────────────────┘
+ * Offset:   0        2              34         35         36             37               57
+ *
+ * - Prefix: Standard CKB script args prefix
+ * - Code Hash: ckb-js-vm code hash for contract execution
+ * - Hash Type: Script hash type (typically 1 for type)
+ * - Threshold: Number of required signatures (always 2 for 2-of-2)
+ * - Pubkey Count: Total number of public keys (always 2)
+ * - Pubkey Hashes: blake160 hashes of the public keys for verification
+ *
  * Witness Args Structure:
  * - lock field contains multisig witness data with 132 bytes total length
  * - Binary layout: [signature1(65)] + [signature2(65)] + [pubkey_index1(1)] + [pubkey_index2(1)]
