@@ -1,13 +1,13 @@
 {
   "devnet": {
     "2of2.bc": {
-      "codeHash": "0x9eae21deb6964da46ebe0fb273e3918a27bf979b3932491a3e6445ccf839b826",
+      "codeHash": "0xc560e3c6906f5833eaee592d4a7102e56abaaccfb83f483fe493bff6d134ff1e",
       "hashType": "data1",
       "cellDeps": [
         {
           "cellDep": {
             "outPoint": {
-              "txHash": "0xf4ea01cc4bfff8b1f1d8c6d7660eb82659edad06c941d195dbcba48740b985b9",
+              "txHash": "0x56e122635c89db33f05a6bd02173addcb0d57c639786b64440c11832e2bea916",
               "index": 0
             },
             "depType": "code"

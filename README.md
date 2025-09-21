@@ -1,17 +1,19 @@
 # sign_2of2
 
-A TypeScript implementation of a 2-of-2 multisignature smart contract for the CKB blockchain.
+A TypeScript implementation of a 2-of-2 multisignature smart contract with time-lock support for the CKB blockchain.
 
 ## Overview
 
-This project implements a secure 2-of-2 multisignature contract using the CKB JavaScript VM (ckb-js-vm). The contract requires both signatures to be valid for a transaction to succeed, providing enhanced security for digital asset management.
+This project implements a secure 2-of-2 multisignature contract using the CKB JavaScript VM (ckb-js-vm). The contract requires both signatures to be valid for a transaction to succeed, with optional time-lock (since) functionality for enhanced security in payment channels and escrow scenarios.
 
 ### Key Features
 
 - **2-of-2 Multisig Security**: Requires signatures from both parties to authorize transactions
+- **Time-lock Support**: Optional since field support for payment channels and time-delayed transactions
+- **Signature-Timelock Binding**: Cryptographically binds signatures to specific timelock values to prevent manipulation
 - **Comprehensive Validation**: Input validation for script args, witness data, and cryptographic parameters
 - **Error Handling**: Detailed error codes for different failure scenarios
-- **Extensive Testing**: Both mock and devnet integration tests
+- **Extensive Testing**: Mock tests, devnet integration tests, and payment channel scenarios
 - **TypeScript Development**: Type-safe smart contract development
 
 ## Project Structure
@@ -22,10 +24,11 @@ sign_2of2/
 │   └── 2of2/
 │       └── src/
 │           └── index.ts    # 2-of-2 multisig contract implementation
-├── tests/                  # Contract tests
-│   ├── 2of2.mock.test.ts   # Unit tests with mock CKB environment
-│   ├── 2of2.devnet.test.ts # Integration tests on local devnet
-│   └── helper.ts           # Test utility functions
+├── tests/                    # Contract tests
+│   ├── 2of2.mock.test.ts     # Unit tests with mock CKB environment (13 test cases)
+│   ├── 2of2.devnet.test.ts   # Integration tests on local devnet (8 test cases)
+│   ├── payment-channel.devnet.test.ts # Payment channel scenarios (5 test cases)
+│   └── helper.ts             # Test utility functions
 ├── scripts/                # Build and utility scripts
 │   ├── build-all.js        # Build all contracts
 │   ├── build-contract.js   # Build specific contract
@@ -88,6 +91,11 @@ Run devnet integration tests (requires local CKB devnet):
 pnpm test -- 2of2.devnet.test.ts
 ```
 
+Run payment channel tests:
+```bash
+pnpm test -- payment-channel.devnet.test.ts
+```
+
 ### Adding New Contracts
 
 Create a new contract:
@@ -100,24 +108,86 @@ This will:
 - Generate a basic contract template
 - Create a corresponding test file
 
-## 2-of-2 Multisig Contract
+## 2-of-2 Multisig Contract with Time-lock Support
 
 ### Contract Overview
 
-The 2-of-2 multisig contract implements a secure multi-party signature verification system where:
+The 2-of-2 multisig contract implements a secure multi-party signature verification system with optional time-lock functionality:
 
 - **Two signatures required**: Both parties must sign for transaction validation
 - **Public key validation**: Signatures are verified against predefined public key hashes
+- **Time-lock support**: Optional since field for payment channels and time-delayed transactions
+- **Signature-timelock binding**: Prevents since value manipulation by binding signatures to specific timelock values
 - **Comprehensive error handling**: Detailed error codes for different failure scenarios
 - **Input validation**: Thorough validation of script args and witness data
+
+### Time-lock (Since) Functionality
+
+When a transaction includes a 'since' field (time-lock), the contract enforces additional security:
+
+#### Signature Message Construction
+- **Without since**: `message = transaction_hash`
+- **With since**: `message = hash(transaction_hash + since_bytes)`
+
+#### Since Field Format (8 bytes, little-endian)
+```
+┌─────────────┬─────────────┬──────────────────────────────────────┐
+│ Metric Flag │ Type Flag   │              Value                  │
+│  (1 bit)    │ (2 bits)    │            (29 bits)                │
+└─────────────┴─────────────┴──────────────────────────────────────┘
+```
+
+- **Absolute time**: `0x0000000000000000 + timestamp`
+- **Relative time**: `0x8000000000000000 + seconds`  
+- **Block height**: `0x4000000000000000 + block_number`
+
+#### External User Signature Process
+```javascript
+// Step 1: Get transaction hash
+const txHash = transaction.hash();
+
+// Step 2: If transaction has since field, combine with since
+if (hasSince) {
+    const sinceBytes = new Uint8Array(8);
+    // Convert since value to little-endian bytes
+    let since = sinceValue;
+    for (let i = 0; i < 8; i++) {
+        sinceBytes[i] = Number(since & 0xffn);
+        since = since >> 8n;
+    }
+    
+    // Combine transaction hash + since bytes
+    const combined = new Uint8Array(txHash.length + sinceBytes.length);
+    combined.set(txHash, 0);
+    combined.set(sinceBytes, txHash.length);
+    
+    // Hash the combined message
+    const messageHash = hashCkb(combined.buffer);
+    
+    // Sign the final message hash
+    const signature = sign(privateKey, messageHash);
+} else {
+    // Sign transaction hash directly
+    const signature = sign(privateKey, txHash);
+}
+```
 
 ### Contract Structure
 
 #### Script Args (42 bytes total)
-- Byte 0: Threshold (2)
-- Byte 1: Public key count (2) 
-- Bytes 2-21: First public key blake160 hash (20 bytes)
-- Bytes 22-41: Second public key blake160 hash (20 bytes)
+```
+┌────────┬──────────────────┬───────────┬───────────┬──────────────┬─────────────────┬─────────────────┐
+│ Prefix │   Code Hash      │ Hash Type │ Threshold │ Pubkey Count │ First Pubkey    │ Second Pubkey   │
+│(2 bytes)│   (32 bytes)     │ (1 byte)  │ (1 byte)  │  (1 byte)    │ Hash (20 bytes) │ Hash (20 bytes) │
+└────────┴──────────────────┴───────────┴───────────┴──────────────┴─────────────────┴─────────────────┘
+Offset:   0        2              34         35         36             37               57
+```
+- Prefix: Standard CKB script args prefix
+- Code Hash: ckb-js-vm code hash for contract execution  
+- Hash Type: Script hash type (typically 1 for type)
+- Threshold: Number of required signatures (always 2 for 2-of-2)
+- Pubkey Count: Total number of public keys (always 2)
+- Pubkey Hashes: blake160 hashes of the public keys for verification
 
 #### Witness Data (132 bytes total)
 ```
@@ -136,6 +206,26 @@ Offset:    0              65             130           131
 - `3`: Invalid witness data length
 - `4`: Invalid pubkey index
 - `5`: Signature recovery failed
+- `6`: Invalid since value (timelock manipulation detected)
+
+## Use Cases
+
+### Payment Channels
+The contract supports unidirectional payment channels where:
+- Buyer locks funds in 2-of-2 multisig with timelock refund
+- Seller can cooperatively close channel at any time
+- Buyer can reclaim funds after timelock expires if seller is uncooperative
+- Since functionality prevents timelock manipulation attacks
+
+### Escrow Services
+- Two parties can create time-locked escrow arrangements
+- Funds automatically become available after specified time
+- Both parties must agree for early release
+
+### Multi-party Wallets
+- Secure storage of digital assets requiring two signatures
+- Enhanced security compared to single-signature wallets
+- Optional time-locked recovery mechanisms
 
 ## Development
 
@@ -153,19 +243,36 @@ All contracts are built to the global `dist/` directory:
 
 ### Testing
 
-The project includes two types of tests:
+The project includes comprehensive test coverage with three types of tests:
 
 #### Mock Tests (`2of2.mock.test.ts`)
 - Use `ckb-testtool` framework to simulate CKB blockchain execution
 - Fast execution with comprehensive edge case testing
-- 8 test cases covering success and failure scenarios
-- Includes boundary condition validation
+- **13 test cases** covering success and failure scenarios:
+  - Valid signature scenarios (2 tests)
+  - Invalid signature scenarios (5 tests)
+  - Script argument validation (1 test)
+  - Witness data validation (1 test)
+  - Public key index validation (2 tests)
+  - Signature recovery validation (1 test)
+  - Robustness and edge case testing (1 test)
 
-#### Devnet Integration Tests (`2of2.devnet.test.ts`) 
+#### Contract Functionality Tests (`2of2.devnet.test.ts`)
 - Connect to actual local CKB devnet
-- Test real transaction execution
-- Two-transaction pattern: create locked UTXO, then unlock with signatures
-- Validates end-to-end contract functionality
+- Test real transaction execution and contract mechanisms
+- **8 test cases** covering:
+  - Basic multisig signature verification (1 test)
+  - Invalid signature rejection (2 tests)
+  - Input validation and error handling (2 tests)
+  - Since (timelock) functionality validation (3 tests)
+
+#### Payment Channel Tests (`payment-channel.devnet.test.ts`)
+- Real-world payment channel implementation scenarios
+- **5 test cases** covering:
+  - Channel setup and lifecycle (1 test)
+  - Timelock enforcement and security (2 tests)
+  - Security against manipulation attacks (1 test)
+  - Cooperative channel operations (1 test)
 
 ## Available Scripts
 
@@ -240,9 +347,22 @@ After successful deployment, artifacts are saved to the `deployment/` directory:
 
 ## Resources
 
+### Helper Functions
+
+The project includes comprehensive utility functions in `tests/helper.ts`:
+
+- **`generateCkbSecp256k1Signature`**: Generate standard ECDSA signatures for CKB
+- **`generateCkbSecp256k1SignatureWithSince`**: Generate signatures with timelock binding
+- **`derivePublicKeyHash`**: Convert private keys to CKB public key hashes
+- **`buildClient`** / **`buildSigner`**: CKB network client setup utilities
+- **Contract testing utilities**: Transaction setup, script args creation, witness data formatting
+
+### Documentation
+
 - [CKB JavaScript VM Documentation](https://github.com/nervosnetwork/ckb-js-vm)
 - [CKB Developer Documentation](https://docs.nervos.org/docs/script/js/js-quick-start)
-- [The Little Book of ckb-js-vm ](https://nervosnetwork.github.io/ckb-js-vm/)
+- [The Little Book of ckb-js-vm](https://nervosnetwork.github.io/ckb-js-vm/)
+- [CKB Timelock Documentation](https://github.com/nervosnetwork/rfcs/blob/master/rfcs/0017-tx-valid-since/0017-tx-valid-since.md)
 
 ## License
 
